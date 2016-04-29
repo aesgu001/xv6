@@ -57,12 +57,15 @@ struct proc {
   pde_t* pgdir;                // Page table
   char *kstack;                // Bottom of kernel stack for this process
   enum procstate state;        // Process state
+  int priority;		       // Process priority
   volatile int pid;            // Process ID
   struct proc *parent;         // Parent process
+  struct proc *wait_p[NPROC];  // Waiting processes
   struct trapframe *tf;        // Trap frame for current syscall
   struct context *context;     // swtch() here to run process
   void *chan;                  // If non-zero, sleeping on chan
   int killed;                  // If non-zero, have been killed
+  int exit_status;	       // Process exit status
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)

@@ -153,7 +153,8 @@ fork(void)
     if(proc->ofile[i])
       np->ofile[i] = filedup(proc->ofile[i]);
   np->cwd = idup(proc->cwd);
- 
+
+  np->priority = 0;
   pid = np->pid;
   np->state = RUNNABLE;
   safestrcpy(np->name, proc->name, sizeof(proc->name));
@@ -164,10 +165,10 @@ fork(void)
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
 void
-exit(void)
+exit(int status)
 {
   struct proc *p;
-  int fd;
+  int fd, i;
 
   if(proc == initproc)
     panic("init exiting");
@@ -183,10 +184,15 @@ exit(void)
   iput(proc->cwd);
   proc->cwd = 0;
 
+  proc->exit_status = status;
+
   acquire(&ptable.lock);
 
   // Parent might be sleeping in wait().
   wakeup1(proc->parent);
+
+  for (i = 0; i < NPROC; i++)
+    wakeup1(proc->wait_p[i]);
 
   // Pass abandoned children to init.
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
@@ -206,7 +212,7 @@ exit(void)
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
 int
-wait(void)
+wait(int *status)
 {
   struct proc *p;
   int havekids, pid;
@@ -230,6 +236,8 @@ wait(void)
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        if (status != 0)
+          *status = p->exit_status;
         release(&ptable.lock);
         return pid;
       }
@@ -241,9 +249,79 @@ wait(void)
       return -1;
     }
 
-    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+    // Wait for children to exit. (See wakeup1 call in proc_exit.)
     sleep(proc, &ptable.lock);  //DOC: wait-sleep
   }
+}
+
+void
+waitpid_help(struct proc *p, struct proc *w_p)
+{
+  int i;
+  for (i = 0; i < NPROC; i++) {
+    if (p->wait_p[i] == 0) {
+      p->wait_p[i] = w_p;
+      return;
+    }
+  }
+}
+
+int
+waitpid(int pid, int *status, int options)
+{
+  struct proc *p;
+  int havekids, ppid;
+
+  acquire(&ptable.lock);
+  for(;;){
+    // Scan through table looking for zombie children.
+    havekids = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(pid != p->pid)
+        continue;
+      havekids = 1;
+      if(p->state == ZOMBIE){
+        // Found one.
+        ppid = p->pid;
+        kfree(p->kstack);
+        p->kstack = 0;
+        freevm(p->pgdir);
+        p->state = UNUSED;
+        p->pid = 0;
+        p->parent = 0;
+        waitpid_help(p,proc);
+        p->name[0] = 0;
+        p->killed = 0;
+        if (status != 0)
+          *status = p->exit_status;
+        release(&ptable.lock);
+        return ppid;
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havekids || proc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    // Wait for children to exit. (See wakeup1 call in proc_exit.)
+    // sleep(proc, &ptable.lock);  //DOC: wait-sleep
+    proc->state = RUNNABLE;
+    sched();
+    release(&ptable.lock);
+  }
+}
+
+void
+change_priority(int p)
+{
+  if (p > 63)
+    proc->priority = 63;
+  else if (p < 0)
+    proc->priority = 0;
+  else
+    proc->priority = p;
 }
 
 //PAGEBREAK: 42
@@ -257,7 +335,7 @@ wait(void)
 void
 scheduler(void)
 {
-  struct proc *p;
+  struct proc *p, *pp, *top;
 
   for(;;){
     // Enable interrupts on this processor.
@@ -269,12 +347,20 @@ scheduler(void)
       if(p->state != RUNNABLE)
         continue;
 
+      top = p;
+      for (pp = p+1; pp < &ptable.proc[NPROC]; pp++) {
+        if (pp->state != RUNNABLE)
+          continue;
+        if (pp->priority > top->priority)
+          top = pp;
+      }
+
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
-      proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+      proc = top;
+      switchuvm(top);
+      top->state = RUNNING;
       swtch(&cpu->scheduler, proc->context);
       switchkvm();
 

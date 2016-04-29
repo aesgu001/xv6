@@ -12,17 +12,23 @@ sys_fork(void)
   return fork();
 }
 
-int
+void
 sys_exit(void)
 {
-  exit();
-  return 0;  // not reached
+  int *ip = 0;
+  if (argint(0, ip) < 0)
+    exit(1);
+  exit(*ip);
 }
 
 int
 sys_wait(void)
 {
-  return wait();
+  char *p = 0;
+  if (argptr(0, &p, 4) < 0)
+    return -1;
+  int *status = (int*)p;
+  return wait(status);
 }
 
 int
@@ -87,4 +93,25 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+int
+sys_waitpid(void)
+{
+  int *ip = 0;
+  char *p = 0;
+  if (argint(0, ip) < 0 || argptr(1, &p, 4) < 0)
+    return -1;
+  int *status = (int*)p;
+  return waitpid(*ip, status, 0);
+}
+
+void
+sys_change_priority(void)
+{
+  int *ip = 0;
+  if (argint(0, ip) < 0)
+    change_priority(0);
+  else
+    change_priority(*ip);
 }

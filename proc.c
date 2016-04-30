@@ -349,7 +349,7 @@ scheduler(void)
         continue;
 
       top = p;
-      for (pp = p+1; pp < &ptable.proc[NPROC]; pp++) {
+      for (pp = ptable.proc; pp < &ptable.proc[NPROC]; pp++) {
         if (pp->state != RUNNABLE)
           continue;
         if (pp->priority > top->priority)

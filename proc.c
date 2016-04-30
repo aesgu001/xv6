@@ -307,6 +307,7 @@ waitpid(int pid, int *status, int options)
 
     // Wait for children to exit. (See wakeup1 call in proc_exit.)
     // sleep(proc, &ptable.lock);  //DOC: wait-sleep
+    acquire(&ptable.lock);
     proc->state = RUNNABLE;
     sched();
     release(&ptable.lock);
